@@ -1,0 +1,195 @@
+#!/bin/bash
+# Developer-Optimized Power Management
+# High performance when needed, quiet when coding
+
+CHARGE_LIMIT=65
+CHARGE_FILE="/sys/class/power_supply/BAT0/charge_control_end_threshold"
+
+# Function to set charge limit
+set_charge_limit() {
+    if [ -w "$CHARGE_FILE" ]; then
+        echo $CHARGE_LIMIT > "$CHARGE_FILE"
+        echo "Charge limit maintained at ${CHARGE_LIMIT}%"
+    else
+        echo $CHARGE_LIMIT | sudo tee "$CHARGE_FILE" > /dev/null
+        echo "Charge limit maintained at ${CHARGE_LIMIT}%"
+    fi
+}
+
+# Function to check power source
+check_power_source() {
+    if [ -f /sys/class/power_supply/AC0/online ]; then
+        cat /sys/class/power_supply/AC0/online
+    else
+        acpi -a 2>/dev/null | grep -q "on-line" && echo 1 || echo 0
+    fi
+}
+
+# Function to get current temperature
+get_cpu_temp() {
+    sensors | grep "Package id 0:" | awk '{print $4}' | sed 's/+//;s/°C//' | cut -d. -f1
+}
+
+# Function to apply settings
+apply_settings() {
+    local mode=$1
+    local temp=$(get_cpu_temp)
+    
+    case "$mode" in
+        "dev-performance")
+            echo "🚀 DEVELOPER PERFORMANCE MODE"
+            echo "   Full CPU performance for compiling/building"
+            
+            # Create temporary high performance TLP config
+            sudo tee /tmp/dev-performance.conf > /dev/null << 'EOF'
+CPU_ENERGY_PERF_POLICY_ON_AC=performance
+CPU_ENERGY_PERF_POLICY_ON_BAT=balance_performance
+CPU_BOOST_ON_AC=1
+CPU_BOOST_ON_BAT=1
+CPU_MIN_PERF_ON_AC=20
+CPU_MAX_PERF_ON_AC=100
+CPU_MIN_PERF_ON_BAT=10
+CPU_MAX_PERF_ON_BAT=70
+PLATFORM_PROFILE_ON_AC=performance
+PLATFORM_PROFILE_ON_BAT=balanced
+RUNTIME_PM_ON_AC=on
+RUNTIME_PM_ON_BAT=auto
+RUNTIME_PM_DRIVER_DENYLIST="nvidia nouveau radeon"
+EOF
+            
+            # Apply high performance settings
+            sudo cp /etc/tlp.conf.backup /etc/tlp.conf
+            sudo tee -a /etc/tlp.conf < /tmp/dev-performance.conf > /dev/null
+            sudo tlp ac
+            
+            echo "   ✓ CPU: 100% max performance"
+            echo "   ✓ GPU: NVIDIA available via prime-run"
+            echo "   ✓ Boost: Enabled for maximum speed"
+            echo "   ⚠️  Fan will run faster - this is normal"
+            ;;
+            
+        "dev-quiet")
+            echo "🤫 DEVELOPER QUIET MODE"
+            echo "   Balanced performance for coding/browsing"
+            
+            # Create quiet development config
+            sudo tee /tmp/dev-quiet.conf > /dev/null << 'EOF'
+CPU_ENERGY_PERF_POLICY_ON_AC=balance_performance
+CPU_ENERGY_PERF_POLICY_ON_BAT=power
+CPU_BOOST_ON_AC=1
+CPU_BOOST_ON_BAT=0
+CPU_MIN_PERF_ON_AC=10
+CPU_MAX_PERF_ON_AC=75
+CPU_MIN_PERF_ON_BAT=10
+CPU_MAX_PERF_ON_BAT=50
+PLATFORM_PROFILE_ON_AC=balanced
+PLATFORM_PROFILE_ON_BAT=low-power
+RUNTIME_PM_ON_AC=auto
+RUNTIME_PM_ON_BAT=auto
+RUNTIME_PM_DRIVER_DENYLIST="nvidia nouveau radeon"
+EOF
+            
+            # Apply quiet settings
+            sudo cp /etc/tlp.conf.backup /etc/tlp.conf
+            sudo tee -a /etc/tlp.conf < /tmp/dev-quiet.conf > /dev/null
+            sudo tlp ac
+            
+            echo "   ✓ CPU: 75% max performance (still fast for development)"
+            echo "   ✓ Fans: Quieter operation"
+            echo "   ✓ Still responsive for coding, web, etc."
+            ;;
+            
+        "dev-auto")
+            power_source=$(check_power_source)
+            
+            if [ "$power_source" = "1" ]; then
+                if (( temp > 65 )); then
+                    echo "🌡️  High temp detected (${temp}°C) - Using quiet mode"
+                    apply_settings "dev-quiet"
+                else
+                    echo "🔌 AC Power - Using balanced developer mode"
+                    apply_settings "dev-quiet"  # Default to quiet for normal use
+                fi
+            else
+                echo "🔋 Battery - Power save mode"
+                sudo tlp bat
+                echo "   ✓ Maximum battery life"
+                echo "   ✓ CPU limited to 50% for battery savings"
+            fi
+            ;;
+    esac
+    
+    set_charge_limit
+}
+
+# Main execution
+case "$1" in
+    "performance"|"perf")
+        apply_settings "dev-performance"
+        ;;
+    "quiet")
+        apply_settings "dev-quiet"
+        ;;
+    "auto")
+        apply_settings "dev-auto"
+        ;;
+    "status")
+        echo "=== Developer Power Status ==="
+        power_source=$(check_power_source)
+        temp=$(get_cpu_temp)
+        
+        if [ "$power_source" = "1" ]; then
+            echo "Power: AC (Plugged In)"
+        else
+            echo "Power: Battery"
+        fi
+        
+        echo "Temperature: ${temp}°C"
+        echo "Charge Limit: $(cat $CHARGE_FILE 2>/dev/null || echo 'Unknown')%"
+        echo ""
+        
+        echo "CPU Performance:"
+        echo "  Max Performance: $(cat /sys/devices/system/cpu/intel_pstate/max_perf_pct)%"
+        echo "  Energy Policy: $(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference)"
+        echo "  Boost Enabled: $([ $(cat /sys/devices/system/cpu/intel_pstate/no_turbo) = "0" ] && echo "Yes" || echo "No")"
+        echo ""
+        
+        echo "Thermals:"
+        sensors | grep -E "(Package|cpu_fan)" | sed 's/^/  /'
+        ;;
+    "build")
+        echo "🔨 BUILD MODE - Maximum Performance"
+        echo "This will use full CPU performance for compilation"
+        read -p "Continue? Fan will be louder (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            apply_settings "dev-performance"
+            echo ""
+            echo "💡 Tip: Run 'dev-power quiet' when build is finished"
+        else
+            echo "Cancelled"
+        fi
+        ;;
+    *)
+        echo "Developer Power Management"
+        echo "Usage: $0 {performance|quiet|auto|status|build}"
+        echo ""
+        echo "🚀 MODES FOR DEVELOPERS:"
+        echo "  performance (perf) - Maximum CPU performance for builds/compilation"
+        echo "  quiet              - Balanced performance, quieter fans for coding"
+        echo "  auto               - Automatic based on power source and temperature"
+        echo "  build              - Interactive build mode with confirmation"
+        echo "  status             - Show detailed performance and thermal status"
+        echo ""
+        echo "💡 DEVELOPER WORKFLOW:"
+        echo "  Normal coding:     dev-power quiet"
+        echo "  Building/compile:  dev-power performance"
+        echo "  Auto management:   dev-power auto"
+        echo ""
+        echo "Current quick status:"
+        temp=$(get_cpu_temp)
+        max_perf=$(cat /sys/devices/system/cpu/intel_pstate/max_perf_pct)
+        fan_rpm=$(sensors | grep "cpu_fan" | awk '{print $2}')
+        echo "  Temperature: ${temp}°C | CPU Max: ${max_perf}% | Fan: ${fan_rpm}"
+        ;;
+esac

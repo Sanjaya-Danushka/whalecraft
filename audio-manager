@@ -1,0 +1,147 @@
+#!/bin/bash
+# PipeWire Audio Management Utility
+
+case "$1" in
+    "status")
+        echo "=== PipeWire Audio Status ==="
+        echo ""
+        echo "🎵 PipeWire Server:"
+        pactl info | grep -E "(Server Name|Server Version|Default Sink|Default Source)"
+        echo ""
+        
+        echo "🔊 Audio Output Devices:"
+        pactl list short sinks | while read id name driver format status; do
+            echo "  [$id] $name - Status: $status"
+        done
+        echo ""
+        
+        echo "🎤 Audio Input Devices:"
+        pactl list short sources | grep -v monitor | while read id name driver format status; do
+            echo "  [$id] $name - Status: $status"
+        done
+        echo ""
+        
+        echo "📊 Volume Levels:"
+        pactl list sinks | grep -A 10 "State: RUNNING" | grep -E "(Volume|Mute)" | head -2 | sed 's/^/  /'
+        ;;
+        
+    "test")
+        echo "🔊 Testing audio output..."
+        if command -v speaker-test >/dev/null 2>&1; then
+            echo "Playing test sound for 3 seconds..."
+            timeout 3s speaker-test -t sine -f 1000 -l 1 2>/dev/null || echo "Test completed"
+        else
+            echo "Creating test tone..."
+            # Generate a simple test tone if speaker-test isn't available
+            echo "Test audio output by playing system sounds or music"
+        fi
+        ;;
+        
+    "devices")
+        echo "=== Audio Devices ==="
+        echo ""
+        echo "🎵 PipeWire Nodes:"
+        pw-cli ls | grep -E "(name|node.description)" | head -20
+        ;;
+        
+    "volume")
+        if [ -z "$2" ]; then
+            echo "Current volume:"
+            pactl list sinks | grep -A 5 "State: RUNNING" | grep Volume | head -1
+            echo ""
+            echo "Usage: $0 volume <0-100>"
+            exit 1
+        fi
+        
+        echo "Setting volume to $2%..."
+        pactl set-sink-volume @DEFAULT_SINK@ "$2%"
+        echo "✓ Volume set to $2%"
+        ;;
+        
+    "mute")
+        pactl set-sink-mute @DEFAULT_SINK@ toggle
+        mute_status=$(pactl list sinks | grep -A 10 "State: RUNNING" | grep Mute | cut -d: -f2 | xargs)
+        echo "🔇 Mute toggled - Status: $mute_status"
+        ;;
+        
+    "gui")
+        echo "Opening audio control panels..."
+        if command -v pavucontrol >/dev/null 2>&1; then
+            pavucontrol &
+            echo "✓ PulseAudio Volume Control (pavucontrol) opened"
+        fi
+        
+        if command -v helvum >/dev/null 2>&1; then
+            helvum &
+            echo "✓ Helvum (PipeWire graph) opened"
+        fi
+        
+        if command -v qpwgraph >/dev/null 2>&1; then
+            qpwgraph &
+            echo "✓ qpwgraph (PipeWire patchbay) opened"
+        fi
+        ;;
+        
+    "restart")
+        echo "🔄 Restarting PipeWire services..."
+        systemctl --user restart pipewire pipewire-pulse wireplumber
+        sleep 2
+        echo "✓ PipeWire services restarted"
+        
+        # Verify restart
+        if systemctl --user is-active --quiet pipewire; then
+            echo "✓ PipeWire is running"
+        else
+            echo "❌ PipeWire failed to start"
+        fi
+        ;;
+        
+    "fix")
+        echo "🔧 Attempting to fix common audio issues..."
+        
+        # Restart services
+        echo "1. Restarting audio services..."
+        systemctl --user restart pipewire pipewire-pulse wireplumber
+        sleep 2
+        
+        # Check if services are running
+        echo "2. Verifying services..."
+        for service in pipewire pipewire-pulse wireplumber; do
+            if systemctl --user is-active --quiet "$service"; then
+                echo "   ✓ $service is running"
+            else
+                echo "   ❌ $service is not running"
+                systemctl --user start "$service"
+            fi
+        done
+        
+        # Unmute audio
+        echo "3. Ensuring audio is not muted..."
+        pactl set-sink-mute @DEFAULT_SINK@ false
+        
+        echo "4. Setting reasonable volume..."
+        pactl set-sink-volume @DEFAULT_SINK@ 50%
+        
+        echo "✅ Audio fix attempt completed"
+        ;;
+        
+    *)
+        echo "PipeWire Audio Manager"
+        echo "Usage: $0 {status|test|devices|volume|mute|gui|restart|fix}"
+        echo ""
+        echo "Commands:"
+        echo "  status   - Show current audio system status"
+        echo "  test     - Test audio output"
+        echo "  devices  - List available audio devices"
+        echo "  volume   - Get/set volume (0-100%)"
+        echo "  mute     - Toggle mute"
+        echo "  gui      - Open audio control GUIs"
+        echo "  restart  - Restart PipeWire services"
+        echo "  fix      - Try to fix common audio issues"
+        echo ""
+        echo "GUI Applications installed:"
+        command -v pavucontrol >/dev/null && echo "  ✓ pavucontrol - Volume control panel"
+        command -v helvum >/dev/null && echo "  ✓ helvum - PipeWire graph viewer"  
+        command -v qpwgraph >/dev/null && echo "  ✓ qpwgraph - PipeWire patchbay"
+        ;;
+esac

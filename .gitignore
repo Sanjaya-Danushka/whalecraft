@@ -1,0 +1,39 @@
+# WhaleCraft - Gitignore
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+
+# Log files
+*.log
+/logs/
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+
+# System-specific files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Configuration overrides (system-specific)
+*.local
+*.personal
+
+# Package lists (user-specific)
+user-packages.txt
+custom-packages.txt
+
+# Test environments
+/test/
+/testing/

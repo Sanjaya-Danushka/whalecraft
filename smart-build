@@ -1,0 +1,67 @@
+#!/bin/bash
+# Smart Build Wrapper - Automatically manages performance for builds
+
+BUILD_CMD="$*"
+
+if [ -z "$BUILD_CMD" ]; then
+    echo "Smart Build Wrapper"
+    echo "Usage: smart-build <your-build-command>"
+    echo ""
+    echo "Examples:"
+    echo "  smart-build make -j8"
+    echo "  smart-build npm run build"
+    echo "  smart-build cargo build --release"
+    echo "  smart-build gcc -O2 myapp.c -o myapp"
+    echo ""
+    echo "This automatically:"
+    echo "  1. Switches to performance mode"
+    echo "  2. Runs your build command"  
+    echo "  3. Switches back to quiet mode"
+    echo "  4. Shows build time and thermal stats"
+    exit 1
+fi
+
+echo "🔨 Starting smart build..."
+echo "Command: $BUILD_CMD"
+echo ""
+
+# Get initial temperature
+TEMP_START=$(sensors | grep "Package id 0:" | awk '{print $4}' | sed 's/+//;s/°C//' | cut -d. -f1)
+echo "Initial temperature: ${TEMP_START}°C"
+
+# Switch to performance mode
+echo "Switching to performance mode..."
+dev-power performance > /dev/null
+
+# Start timing
+BUILD_START=$(date +%s)
+
+# Run the build command
+echo ""
+echo "▶️  Running build command..."
+eval "$BUILD_CMD"
+BUILD_EXIT_CODE=$?
+
+# Calculate build time
+BUILD_END=$(date +%s)
+BUILD_TIME=$((BUILD_END - BUILD_START))
+
+# Get final temperature
+TEMP_END=$(sensors | grep "Package id 0:" | awk '{print $4}' | sed 's/+//;s/°C//' | cut -d. -f1)
+
+echo ""
+echo "🏁 Build completed!"
+echo "═══════════════════════════════"
+echo "Build time: ${BUILD_TIME}s"
+echo "Initial temp: ${TEMP_START}°C"
+echo "Final temp: ${TEMP_END}°C"
+echo "Exit code: $BUILD_EXIT_CODE"
+
+# Switch back to quiet mode
+echo ""
+echo "Switching back to quiet mode..."
+dev-power quiet > /dev/null
+
+echo "✅ Ready for development work (fans will quiet down shortly)"
+
+exit $BUILD_EXIT_CODE
